@@ -1,7 +1,10 @@
 
 *~
 *.swp
+*.lnk
+
 project
 target
+
 
 
