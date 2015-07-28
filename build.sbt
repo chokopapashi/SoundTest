@@ -22,6 +22,10 @@ lazy val root = (project in file(".")).
         // Reflect of Ver2.10.1-> requires to add libraryDependencies explicitly
         libraryDependencies <+= scalaVersion { "org.scala-lang" % "scala-reflect" % _ },
 
+        // add Akka dependency
+        libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.3.11",
+        libraryDependencies += "com.typesafe.akka" %% "akka-slf4j" % "2.3.11",
+
         // add ScalaTest dependency
         libraryDependencies += "org.scalatest" % "scalatest_2.11" % "2.2.4" % "test",
 
@@ -32,6 +36,9 @@ lazy val root = (project in file(".")).
 
         // add HZUtil dependecies
         libraryDependencies += "org.hirosezouen" %% "hzutil" % "2.0.0",
+
+        // add HZActor dependency
+        libraryDependencies += "org.hirosezouen" %% "hzactor" % "1.0.0",
 
         // Avoid sbt warning ([warn] This usage is deprecated and will be removed in sbt 1.0)
         // Current Sbt dose not allow overwrite stabele release created publicLocal task.
