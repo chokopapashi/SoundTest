@@ -14,6 +14,7 @@ import akka.actor.OneForOneStrategy
 import akka.actor.SupervisorStrategy.Escalate
 import akka.actor.SupervisorStrategy.Stop
 
+import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 
 import org.hirosezouen.hzutil._
@@ -29,6 +30,8 @@ object SoundTest {
         log_trace(s"MixerInfo:${mi.toString}")
         val m  = AudioSystem.getMixer(mi)
         log_trace(s"Mixer:${m.toString}")
+        if(m.getTargetLineInfo.size == 0)
+            throw new IllegalStateException()
         val tli = m.getTargetLineInfo()(i2)
         log_trace(s"TargetLineInfo:${tli.toString}")
         catching(classOf[Exception]) either {
@@ -47,16 +50,16 @@ object SoundTest {
 
     def getTargetDataLine(): TargetDataLine = {
         if(System.getProperty("os.name").startsWith("Windows"))
-            getTargetDataLine(3,0)
+            getTargetDataLine(config.getInt("sound_test.mixer_index"), config.getInt("sound_test.target_line_index"))
         else if(System.getProperty("os.name").startsWith(""))
-            getTargetDataLine(0,0)
+            getTargetDataLine(config.getInt("sound_test.mixer_index"), config.getInt("sound_test.target_line_index"))
         else
             throw new IllegalStateException()
     }
 
-    def openLine(line: Line) {
+    def openLine(line: TargetDataLine) {
         catching(classOf[Exception]) either {
-            line.open()
+            line.open(new AudioFormat(8000, 8, 1, true, false))
         } match {
             case Right(_) => /* Nothing to do */
             case Left(th) => th match {
@@ -69,31 +72,36 @@ object SoundTest {
     class LineInputActor(parent: ActorRef) extends Actor {
         log_trace("LineInputActor")
 
+        case class ReceiveLoop()
+
+        lazy val targetDataLine = getTargetDataLine()
+        lazy val data = new Array[Byte](targetDataLine.getBufferSize/5)
+
         override def preStart() {
-            val targetDataLine = getTargetDataLine()
-            openLine(targetDataLine)
 
             val out = new ByteArrayOutputStream()
             var count: Int = 0
-            val data = new Array[Byte](targetDataLine.getBufferSize/5)
-        }
 
-        case class ReceiveLoop()
+            openLine(targetDataLine)
+            targetDataLine.start
+
+            self ! ReceiveLoop()
+        }
 
         def receive = {
             case HZStop() => {
                 exitNormaly(parent)
             }
             case ReceiveLoop() => {
-
+                val count = targetDataLine.read(data, 0, data.size)
+                log_info("[" + data.take(count).map(b => f"$b%02X").mkString(",") + "]")
             }
             case x => log_debug(s"x=$x")
         }
     }
     object LineInputActor {
-        def start(parent: ActorRef)(implicit system: ActorRefFactory): ActorRef = {
-            system.actorOf(Props(new LineInputActor(parent)))
-        }
+        def start(parent: ActorRef)(implicit system: ActorRefFactory): ActorRef =
+            system.actorOf(Props(new LineInputActor(parent)), "LineInputActor")
     }
 
     class MainActor extends Actor {
@@ -108,13 +116,12 @@ object SoundTest {
 
         val quit_r = "(?i)^q$".r
         override def preStart() {
-            val inputActor = InputActor.start(System.in) {
-                case quit_r() => System.in.close
-            }
-
-            val lineInputActor = LineInputActor.start(self)
-
-            actorStates += (inputActor, lineInputActor)
+            actorStates += (
+                InputActor.start(System.in) {
+                    case quit_r() => System.in.close
+                },
+                LineInputActor.start(self)
+            )
             log_trace(s"actorStates=$actorStates")
         }
 
@@ -126,26 +133,15 @@ object SoundTest {
         }
     }
     object MainActor {
-        def start(implicit system: ActorRefFactory): ActorRef = {
-            system.actorOf(Props(new MainActor))
-        }
+        def start(implicit system: ActorRefFactory): ActorRef =
+            system.actorOf(Props(new MainActor), "MainActor")
     }
 
+    lazy val config: Config = ConfigFactory.load
+
     def main(arg: Array[String]) {
-        val config = ConfigFactory.parseString("""
-            akka {
-                loglevel = "DEBUG"
-                loggers = ["akka.event.slf4j.Slf4jLogger"]
-                logging-filter = "akka.event.slf4j.Slf4jLoggingFilter"
-            }
-
-            akka.actor.debug {
-                receive = on
-                lifecycle = on
-            }
-        """)
-
-        implicit val system = ActorSystem("SoundTest", config)
+        
+        implicit val system = ActorSystem("SoundTest", ConfigFactory.load("akka_application.conf"))
         MainActor.start
         system.awaitTermination()
     }
